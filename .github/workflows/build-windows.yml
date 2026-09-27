@@ -1,0 +1,31 @@
+name: Build Windows x64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        shell: cmd
+        run: build-windows-x64.cmd
+
+      - name: Find build output
+        shell: powershell
+        run: |
+          Write-Host "Searching for executables..."
+          Get-ChildItem -Path . -Recurse -Filter *.exe |
+            Select-Object FullName
+
+      - name: Upload executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: GbaCheatConverter-Windows-x64
+          path: |
+            **/*.exe
+          if-no-files-found: error
