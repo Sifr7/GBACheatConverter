@@ -2,6 +2,7 @@
 
 #include "core/text.hpp"
 #include "formats/retroarch_cht.hpp"
+#include "formats/codebreaker.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -85,6 +86,44 @@ CheatEntry import_core_record(const retroarch_cht::Record& record,
     entry.retroarch = metadata_from_record(record);
 
     const std::vector<std::string> rows = split_core_code(record.code);
+
+    std::string codebreaker_input;
+    const std::string normalized =
+        text::normalize_newlines_lf(record.code);
+
+    for (const std::string& raw_line :
+         text::split_lines(normalized)) {
+        const std::string line = text::trim(raw_line);
+        if (line.empty()) {
+            continue;
+        }
+
+        std::istringstream input(line);
+        std::vector<std::string> parts;
+
+        std::string part;
+        while (std::getline(input, part, '+')) {
+            part = text::trim(part);
+            if (!part.empty()) {
+                parts.push_back(part);
+            }
+        }
+
+        if (parts.size() < 2U || parts.size() % 2U != 0U) {
+            continue;
+        }
+
+        for (std::size_t i = 0U; i < parts.size(); i += 2U) {
+            if (!codebreaker_input.empty()) {
+                codebreaker_input += '\n';
+            }
+
+            codebreaker_input += parts[i];
+            codebreaker_input += ' ';
+            codebreaker_input += parts[i + 1U];
+        }
+    }
+
     if (rows.empty()) {
         warnings.push_back(
             "RetroArch cheat '" + entry.name +
@@ -94,11 +133,25 @@ CheatEntry import_core_record(const retroarch_cht::Record& record,
 
     bool all8x4 = true;
     bool all8x8 = true;
+
     for (const std::string& row : rows) {
         all8x4 = all8x4 && text::is_code_line_8x4(row);
         all8x8 = all8x8 && text::is_code_line_8x8(row);
     }
+
     if (all8x4 == all8x8) {
+        if (!codebreaker_input.empty()) {
+            CheatDocument parsed =
+                gba::codebreaker::parse(codebreaker_input, {false});
+
+            if (parsed.warnings.empty() &&
+                parsed.entries.size() == 1U) {
+                entry.operations =
+                    std::move(parsed.entries.front().operations);
+                return entry;
+            }
+        }
+
         warnings.push_back(
             "RetroArch core cheat '" + entry.name +
             "' uses a core-specific code string that cannot be converted "
@@ -109,16 +162,23 @@ CheatEntry import_core_record(const retroarch_cht::Record& record,
     NativeEntry native;
     native.name = entry.name;
     native.format = all8x4
-        ? InputFormat::FcdRaw : InputFormat::ActionReplayMaxRaw;
+        ? InputFormat::FcdRaw
+        : InputFormat::ActionReplayMaxRaw;
     native.code_lines = rows;
+
     CheatDocument parsed = parse_entry(native);
-    if (!parsed.warnings.empty() || parsed.entries.size() != 1U) {
+
+    if (!parsed.warnings.empty() ||
+        parsed.entries.size() != 1U) {
         warnings.push_back(
             "RetroArch core cheat '" + entry.name +
             "' could not be decoded safely; its original code was preserved.");
         return entry;
     }
-    entry.operations = std::move(parsed.entries.front().operations);
+
+    entry.operations =
+        std::move(parsed.entries.front().operations);
+
     return entry;
 }
 
